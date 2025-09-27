@@ -202,8 +202,15 @@ fun HideLauncherIconWarningDialog(
             text = {
                 Column {
                     Text(stringResource(R.string.theme_settings_hide_launcher_icon_warning))
-                    if (RsConfig.currentManufacturer == Manufacturer.XIAOMI)
-                        Text(stringResource(R.string.theme_settings_hide_launcher_icon_warning_xiaomi))
+                    when (RsConfig.currentManufacturer) {
+                        Manufacturer.XIAOMI ->
+                            Text(stringResource(R.string.theme_settings_hide_launcher_icon_warning_xiaomi))
+
+                        Manufacturer.VIVO ->
+                            Text(stringResource(R.string.theme_settings_hide_launcher_icon_warning_vivo))
+
+                        else -> Unit
+                    }
                 }
             },
             confirmButton = {
