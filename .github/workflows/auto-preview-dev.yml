@@ -73,7 +73,7 @@ jobs:
           mkdir -p temp
           unzip app/build/outputs/apk/onlineUnstable/release/*.apk -d temp
           cp -r temp/lib module/system/priv-app/com.android.packageinstaller/
-          cp app/build/outputs/apk/onlineUnstable/release/*.apk module/priv-app/com.android.packageinstaller/com.android.packageinstaller.apk
+          cp app/build/outputs/apk/onlineUnstable/release/*.apk module/system/priv-app/com.android.packageinstaller/com.android.packageinstaller.apk
           zip -r module.zip module/*
 
       # 8. 上传 APK 作为 Artifact
