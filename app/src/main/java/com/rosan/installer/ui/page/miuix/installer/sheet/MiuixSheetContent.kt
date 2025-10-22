@@ -70,6 +70,7 @@ import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewAction
 import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewModel
 import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewState
 import com.rosan.installer.ui.page.miuix.widgets.MiuixErrorTextBlock
+import com.rosan.installer.ui.page.miuix.widgets.MiuixNavigationItemWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixSwitchWidget
 import com.rosan.installer.util.asUserReadableSplitName
 import kotlinx.coroutines.Dispatchers
@@ -211,7 +212,10 @@ fun MiuixSheetContent(
 }
 
 @Composable
-private fun InstallChoiceContent(installer: InstallerRepo, viewModel: InstallerViewModel) {
+private fun InstallChoiceContent(
+    installer: InstallerRepo,
+    viewModel: InstallerViewModel
+) {
     val analysisResults = installer.analysisResults
     val containerType = analysisResults.firstOrNull()?.appEntities?.firstOrNull()?.app?.containerType ?: DataType.NONE
     val isMultiApk = containerType == DataType.MULTI_APK || containerType == DataType.MULTI_APK_ZIP
@@ -539,7 +543,12 @@ private fun MiuixSingleItemCard(
 }
 
 @Composable
-private fun MiuixSelectableSubCard(item: SelectInstallEntity, cardColor: Color, isRadio: Boolean, onClick: () -> Unit) {
+private fun MiuixSelectableSubCard(
+    item: SelectInstallEntity,
+    cardColor: Color,
+    isRadio: Boolean,
+    onClick: () -> Unit
+) {
     val haptic = LocalHapticFeedback.current
     val selectedColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.1f)
     Card(
@@ -583,7 +592,6 @@ private fun MiuixSelectableSubCard(item: SelectInstallEntity, cardColor: Color, 
         }
     }
 }
-
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -678,6 +686,8 @@ private fun InstallPrepareContent(
     val currentPackageName by viewModel.currentPackageName.collectAsState()
     val currentPackage = installer.analysisResults.find { it.packageName == currentPackageName }
     val displayIcons by viewModel.displayIcons.collectAsState()
+
+    var isExpanded by remember { mutableStateOf(false) }
 
     if (currentPackage == null) {
         LoadingContent(statusText = stringResource(id = R.string.loading))
@@ -792,6 +802,55 @@ private fun InstallPrepareContent(
                     }
                 }
             }
+        }
+
+        item {
+            AnimatedVisibility(visible = isExpanded) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    colors = CardColors(
+                        color = if (isSystemInDarkTheme()) Color(0xFF434343) else Color.White,
+                        contentColor = MiuixTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Column {
+                        // 1. Permissions List (Placeholder)
+                        MiuixNavigationItemWidget(
+                            title = "权限列表",
+                            description = "查看应用请求的权限",
+                            onClick = { /* TODO: Implement action */ },
+                        )
+
+                        // 2. Install Options (Placeholder)
+                        MiuixNavigationItemWidget(
+                            title = "安装选项",
+                            description = "配置安装参数，如下放权限、允许降级",
+                            onClick = { /* TODO: Implement action */ }
+                        )
+
+                        // 3. Select Splits (Conditional)
+                        val hasSplits = currentPackage.appEntities.size > 1
+                        if (hasSplits) {
+                            MiuixNavigationItemWidget(
+                                title = "选择分包",
+                                description = "重新选择要安装的 APKS 分包",
+                                onClick = { viewModel.dispatch(InstallerViewAction.InstallChoice) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // "Expand More" / "Collapse" Button
+        item {
+            TextButton(
+                onClick = { isExpanded = !isExpanded },
+                modifier = Modifier.fillMaxWidth(),
+                text = if (isExpanded) "收起" else "展开更多"
+            )
         }
 
         item {
@@ -1002,7 +1061,7 @@ private fun SdkInfoRow(
                 val isIncompatible = type == "min" && newSdkInt > Build.VERSION.SDK_INT
                 // val color = if (isDowngrade || isIncompatible) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
 
-                val oldText = if (isArchived) stringResource(R.string.old_version_archived) else oldSdk.toString()
+                val oldText = if (isArchived) stringResource(R.string.old_version_archived) else oldSdk
 
                 Text(text = oldText, style = MiuixTheme.textStyles.body2)
 
@@ -1027,7 +1086,10 @@ private fun SdkInfoRow(
 }
 
 @Composable
-private fun PrepareSettingsContent(installer: InstallerRepo, viewModel: InstallerViewModel) {
+private fun PrepareSettingsContent(
+    installer: InstallerRepo,
+    viewModel: InstallerViewModel
+) {
     var autoDelete by remember { mutableStateOf(installer.config.autoDelete) }
     var displaySdk by remember { mutableStateOf(installer.config.displaySdk) }
 
@@ -1092,6 +1154,16 @@ private fun InstallingContent(
             packageName = baseEntity?.packageName ?: "unknown.package"
         )
         Spacer(modifier = Modifier.height(32.dp))
+        if (progressText != null) {
+            Text(
+                text = progressText,
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 16.dp),
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         Button(
             enabled = false,
             onClick = {},
@@ -1103,7 +1175,7 @@ private fun InstallingContent(
                 InfiniteProgressIndicator()
                 Spacer(modifier = Modifier.width(16.dp))
                 Text(
-                    text = progressText ?: stringResource(R.string.installer_installing)
+                    text = stringResource(R.string.installer_installing)
                 )
             }
         }

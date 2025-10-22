@@ -372,7 +372,7 @@ fun MiuixSettingsAboutItemWidget(
  * @param onClick The callback to be invoked when this pkg is clicked.
  */
 @Composable
-fun MiuixSettingsNavigationItemWidget(
+fun MiuixNavigationItemWidget(
     icon: ImageVector? = null,
     title: String,
     description: String,
