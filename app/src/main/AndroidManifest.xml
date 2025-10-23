@@ -96,6 +96,11 @@
                 <data android:pathPattern=".*" />
                 <data android:mimeType="*/*" />
             </intent-filter>
+
+            <intent-filter android:priority="10">
+                <action android:name="android.content.pm.action.CONFIRM_INSTALL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <activity

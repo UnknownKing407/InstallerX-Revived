@@ -1,29 +1,40 @@
 package com.rosan.installer.ui.activity
 
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.rosan.installer.R
 import com.rosan.installer.build.Level
 import com.rosan.installer.build.RsConfig
 import com.rosan.installer.data.installer.model.entity.ProgressEntity
 import com.rosan.installer.data.installer.repo.InstallerRepo
+import com.rosan.installer.data.reflect.repo.ReflectRepo
 import com.rosan.installer.data.settings.model.datastore.AppDataStore
 import com.rosan.installer.ui.page.main.installer.InstallerPage
-import com.rosan.installer.ui.page.miuix.installer.MiuixInstallerPage
 import com.rosan.installer.ui.theme.InstallerMaterialExpressiveTheme
-import com.rosan.installer.ui.theme.InstallerMiuixTheme
 import com.rosan.installer.ui.util.PermissionDenialReason
 import com.rosan.installer.ui.util.PermissionManager
 import com.rosan.installer.util.toast
@@ -41,12 +52,19 @@ import timber.log.Timber
 class InstallerActivity : ComponentActivity(), KoinComponent {
     companion object {
         const val KEY_ID = "installer_id"
+        private const val ACTION_CONFIRM_INSTALL = "android.content.pm.action.CONFIRM_INSTALL"
     }
 
     private val appDataStore: AppDataStore by inject()
+    private val reflect: ReflectRepo by inject()
 
     private var installer by mutableStateOf<InstallerRepo?>(null)
     private var job: Job? = null
+
+    private data class ConfirmationState(val sessionId: Int, val sessionInfo: PackageInstaller.SessionInfo)
+
+    private var confirmationState by mutableStateOf<ConfirmationState?>(null)
+
     private lateinit var permissionManager: PermissionManager
 
     private enum class InstallerTheme {
@@ -81,16 +99,23 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
         }
 
         permissionManager = PermissionManager(this)
-        restoreInstaller(savedInstanceState)
-        val installerId =
-            if (savedInstanceState == null) intent?.getStringExtra(KEY_ID) else savedInstanceState.getString(KEY_ID)
-
-        if (installerId == null) {
-            Timber.d("onCreate: This is a fresh launch for a new task. Starting permission and resolve process.")
-            // Only start the process for a completely new task.
-            checkPermissionsAndStartProcess()
+        if (intent.action == ACTION_CONFIRM_INSTALL) {
+            // Flow B: 我们被系统调用以确认一个已有的会话
+            Timber.d("onCreate: Handling CONFIRM_INSTALL flow.")
+            handleConfirmInstall(intent)
         } else {
-            Timber.d("onCreate: Re-attaching to existing installer ($installerId). Skipping resolve process.")
+            Timber.d("onCreate: Handling CLIENT (ACTION_VIEW/SEND) flow.")
+            restoreInstaller(savedInstanceState)
+            val installerId =
+                if (savedInstanceState == null) intent?.getStringExtra(KEY_ID) else savedInstanceState.getString(KEY_ID)
+
+            if (installerId == null) {
+                Timber.d("onCreate: This is a fresh launch for a new task. Starting permission and resolve process.")
+                // Only start the process for a completely new task.
+                checkPermissionsAndStartProcess()
+            } else {
+                Timber.d("onCreate: Re-attaching to existing installer ($installerId). Skipping resolve process.")
+            }
         }
         showContent()
     }
@@ -140,17 +165,22 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
         Timber.d("onNewIntent: Received new intent.")
         if (RsConfig.isDebug && RsConfig.LEVEL == Level.UNSTABLE)
             logIntentDetails("onNewIntent", intent)
-        // Fix for Microsoft Edge
-        if (this.installer != null) {
-            Timber.w("onNewIntent was called, but an installer instance already exists. Ignoring re-initialization.")
-            super.onNewIntent(intent) // Call super, but do not proceed further.
-            return
+        if (intent.action == ACTION_CONFIRM_INSTALL) {
+            // Flow B: 确认流程
+            Timber.d("onNewIntent: Handling CONFIRM_INSTALL flow.")
+            handleConfirmInstall(intent)
+        } else {// Fix for Microsoft Edge
+            if (this.installer != null) {
+                Timber.w("onNewIntent was called, but an installer instance already exists. Ignoring re-initialization.")
+                super.onNewIntent(intent) // Call super, but do not proceed further.
+                return
+            }
+            if (intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK == 0)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            this.intent = intent
+            super.onNewIntent(intent)
+            restoreInstaller()
         }
-        if (intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK == 0)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        this.intent = intent
-        super.onNewIntent(intent)
-        restoreInstaller()
     }
 
     override fun onDestroy() {
@@ -160,7 +190,39 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
         super.onDestroy()
     }
 
+    private fun handleConfirmInstall(intent: Intent) {
+        val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        if (sessionId == -1) {
+            Timber.e("CONFIRM_INSTALL intent missing EXTRA_SESSION_ID")
+            finish()
+            return
+        }
+        Timber.d("handleConfirmInstall: sessionId=$sessionId")
+
+        job?.cancel()
+        job = null
+        installer = null
+
+        try {
+            val packageInstaller = packageManager.packageInstaller
+            val sessionInfo = packageInstaller.getSessionInfo(sessionId)
+            if (sessionInfo == null) {
+                Timber.e("Could not get SessionInfo for id $sessionId")
+                finish()
+                return
+            }
+            confirmationState = ConfirmationState(sessionId, sessionInfo)
+            Timber.d("handleConfirmInstall: State set for ConfirmationFlow")
+
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to handle CONFIRM_INSTALL")
+            finish()
+        }
+    }
+
     private fun restoreInstaller(savedInstanceState: Bundle? = null) {
+        confirmationState = null
+
         val installerId =
             if (savedInstanceState == null) intent?.getStringExtra(KEY_ID) else savedInstanceState.getString(KEY_ID)
         Timber.d("restoreInstaller: Attempting to restore with id: $installerId")
@@ -205,55 +267,96 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
         setContent {
             if (!uiState.isThemeLoaded) return@setContent
 
-            val installer = installer ?: return@setContent
-            val background by installer.background.collectAsState(false)
-            val progress by installer.progress.collectAsState(ProgressEntity.Ready)
+            val installer = installer
 
-            if (background || progress is ProgressEntity.Ready || progress is ProgressEntity.InstallResolving || progress is ProgressEntity.Finish)
+
+            /*if (background || progress is ProgressEntity.Ready || progress is ProgressEntity.InstallResolving || progress is ProgressEntity.Finish)
             // Return@setContent to show nothing, logs will explain why.
-                return@setContent
-            /* Box(
-                 modifier = Modifier
-                     .fillMaxSize()
-                     // 2. 模拟背景：设置一个半透明的背景色，这就实现了“变暗”效果
-                     .background(Color.Black.copy(alpha = 0.6f))
-                     // 3. 模拟外部点击：为背景添加点击手势，点击时关闭 Activity
-                     .pointerInput(Unit) {
-                         detectTapGestures {
-                             finish() // 点击背景任意位置，关闭这个安装界面
-                         }
-                     }
-             ) {
-                 // 4. 放置您的 BottomSheet：
-                 //    - 将其放在前景，这样它就不会被背景遮挡
-                 //    - 使用 align 将其定位在您期望的位置（例如底部）
-                 //    - 添加一个空的 pointerInput 来消费点击事件，防止点击 BottomSheet 时触发背景的关闭事件
-                 Box(
-                     modifier = Modifier
-                         .align(Alignment.BottomCenter) // 或 Alignment.Center，取决于您希望它如何展示
-                         .pointerInput(Unit) {
-                             detectTapGestures { *//* 消费点击，防止穿透 *//* }
-                        }
-                ) {*/
-            // 这里的代码和您原来的一模一样，完全不需要改动
-            when (uiState.theme) {
-                InstallerTheme.MATERIAL -> {
-                    InstallerMaterialExpressiveTheme {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            InstallerPage(installer)
-                        }
-                    }
-                }
+                return@setContent*/
 
-                InstallerTheme.MIUIX -> {
-                    InstallerMiuixTheme {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            // 您的 MiuixInstallerPage 在这里可以完美工作
-                            MiuixInstallerPage(installer)
-                        }
+            val confirmationState = confirmationState
+
+            if (installer == null && confirmationState == null)
+                return@setContent
+
+            InstallerMaterialExpressiveTheme {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (confirmationState != null)
+                        ShowConfirmationDialog(
+                            sessionInfo = confirmationState.sessionInfo,
+                            onInstall = {
+                                Timber.d("CONFIRM: Install clicked for session ${confirmationState.sessionId}")
+                                approveSession(confirmationState.sessionId, true)
+                            },
+                            onCancel = {
+                                Timber.d("CONFIRM: Cancel clicked for session ${confirmationState.sessionId}")
+                                approveSession(confirmationState.sessionId, true)
+                            }
+                        )
+                    else if (installer != null) {
+                        val background by installer.background.collectAsState(false)
+                        val progress by installer.progress.collectAsState(ProgressEntity.Ready)
+                        InstallerPage(installer)
                     }
                 }
             }
+        }
+        /*when (uiState.theme) {
+            InstallerTheme.MATERIAL -> {
+                InstallerMaterialExpressiveTheme {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        InstallerPage(installer)
+                    }
+                }
+            }
+
+            InstallerTheme.MIUIX -> {
+                InstallerMiuixTheme {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        MiuixInstallerPage(installer)
+                    }
+                }
+            }
+        }*/
+    }
+
+    private fun approveSession(sessionId: Int, granted: Boolean) {
+        try {
+            val packageInstaller = packageManager.packageInstaller
+
+            //
+            // 查找隐藏方法: setPermissionsResult(int sessionId, boolean granted)
+            val method = reflect.getMethod( // 【修改】使用 reflectRepo
+                packageInstaller::class.java,
+                "setPermissionsResult",
+                Int::class.java,      // 参数1: int
+                Boolean::class.java   // 参数2: boolean
+            ) //
+
+            if (method != null) { // 【新增】检查方法是否找到
+                // 调用隐藏方法
+                method.invoke(packageInstaller, sessionId, granted)
+                Timber.d("approveSession: Invoked hidden setPermissionsResult($sessionId, $granted) successfully.")
+            } else {
+                // 如果方法未找到，抛出异常以进入 catch 块
+                throw NoSuchMethodException("setPermissionsResult not found via ReflectRepo")
+            }
+
+        } catch (e: Exception) {
+            // 记录错误 (NoSuchMethodException, InvocationTargetException, etc.)
+            Timber.e(e, "approveSession: Failed to invoke hidden setPermissionsResult via reflection.")
+            // 作为一个备用方案，如果拒绝了，我们可以尝试放弃会话。
+            // 这不是完美的，但总比什么都不做要好。
+            if (!granted) {
+                try {
+                    packageManager.packageInstaller.abandonSession(sessionId)
+                } catch (e2: Exception) {
+                    Timber.e(e2, "approveSession: Fallback abandonSession also failed.")
+                }
+            }
+        } finally {
+            // 无论如何，我们都必须结束这个 Activity
+            finish()
         }
     }
 
@@ -277,4 +380,47 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
         Timber.tag(tag).d("Extras: ${intent.extras?.keySet()?.joinToString(", ")}")
         Timber.tag(tag).d("---------- Intent Details End ----------")
     }
+}
+
+@Composable
+private fun ShowConfirmationDialog(
+    sessionInfo: PackageInstaller.SessionInfo,
+    onInstall: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val context = LocalContext.current
+    val appLabel = sessionInfo.appLabel ?: "N/A"
+
+    // sessionInfo.appIcon 是一个 Bitmap，我们需要将其转换为 Compose 兼容的 ImageBitmap
+    val appIconBitmap = sessionInfo.appIcon?.asImageBitmap()
+
+    AlertDialog(
+        onDismissRequest = onCancel, // 用户点击对话框外部或按返回键
+        confirmButton = {
+            Button(onClick = onInstall) {
+                Text(stringResource(R.string.install))
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onCancel) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+        icon = {
+            if (appIconBitmap != null) {
+                Image(
+                    bitmap = appIconBitmap,
+                    contentDescription = "App Icon",
+                    modifier = Modifier.size(40.dp) // Material Dialog 的标准图标大小
+                )
+            }
+        },
+        title = {
+            Text(text = appLabel.toString())
+        },
+        text = {
+            // TODO: 您可以在此处添加更多信息，例如从 sessionInfo 解析权限
+            Text(text = stringResource(R.string.confirm))
+        }
+    )
 }
