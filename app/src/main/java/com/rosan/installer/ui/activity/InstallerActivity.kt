@@ -290,7 +290,7 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
                             },
                             onCancel = {
                                 Timber.d("CONFIRM: Cancel clicked for session ${confirmationState.sessionId}")
-                                approveSession(confirmationState.sessionId, true)
+                                approveSession(confirmationState.sessionId, false)
                             }
                         )
                     else if (installer != null) {
@@ -324,29 +324,22 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
         try {
             val packageInstaller = packageManager.packageInstaller
 
-            //
-            // 查找隐藏方法: setPermissionsResult(int sessionId, boolean granted)
-            val method = reflect.getMethod( // 【修改】使用 reflectRepo
+            val method = reflect.getMethod(
                 packageInstaller::class.java,
                 "setPermissionsResult",
-                Int::class.java,      // 参数1: int
-                Boolean::class.java   // 参数2: boolean
+                Int::class.java,
+                Boolean::class.java
             ) //
 
-            if (method != null) { // 【新增】检查方法是否找到
-                // 调用隐藏方法
+            if (method != null) {
                 method.invoke(packageInstaller, sessionId, granted)
                 Timber.d("approveSession: Invoked hidden setPermissionsResult($sessionId, $granted) successfully.")
             } else {
-                // 如果方法未找到，抛出异常以进入 catch 块
                 throw NoSuchMethodException("setPermissionsResult not found via ReflectRepo")
             }
 
         } catch (e: Exception) {
-            // 记录错误 (NoSuchMethodException, InvocationTargetException, etc.)
             Timber.e(e, "approveSession: Failed to invoke hidden setPermissionsResult via reflection.")
-            // 作为一个备用方案，如果拒绝了，我们可以尝试放弃会话。
-            // 这不是完美的，但总比什么都不做要好。
             if (!granted) {
                 try {
                     packageManager.packageInstaller.abandonSession(sessionId)
@@ -355,7 +348,6 @@ class InstallerActivity : ComponentActivity(), KoinComponent {
                 }
             }
         } finally {
-            // 无论如何，我们都必须结束这个 Activity
             finish()
         }
     }
@@ -389,9 +381,25 @@ private fun ShowConfirmationDialog(
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
+    val tag = "ShowConfirmDump"
+    Timber.tag(tag).d("--- Dumping SessionInfo (ID: ${sessionInfo.sessionId}) ---")
+    Timber.tag(tag).d("AppLabel: ${sessionInfo.appLabel}")
+    Timber.tag(tag).d("AppPackageName: ${sessionInfo.appPackageName}")
+    Timber.tag(tag).d("AppIcon available: ${sessionInfo.appIcon != null}")
+    Timber.tag(tag).d("CreatedMillis: ${sessionInfo.createdMillis}")
+    Timber.tag(tag).d("InstallerPackageName: ${sessionInfo.installerPackageName}")
+    Timber.tag(tag).d("InstallerAttributionTag: ${sessionInfo.installerAttributionTag}")
+    Timber.tag(tag).d("OriginatingUid: ${sessionInfo.originatingUid}") //
+    Timber.tag(tag).d("IsActive: ${sessionInfo.isActive}")
+    Timber.tag(tag).d("IsSealed: ${sessionInfo.isSealed}") //
+
+    // 记录 Android S (API 31)及更高版本中可用的字段
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        Timber.tag(tag).d("InstallReason: ${sessionInfo.installReason}")
+    }
+    Timber.tag(tag).d("--- End of SessionInfo Dump ---")
     val appLabel = sessionInfo.appLabel ?: "N/A"
 
-    // sessionInfo.appIcon 是一个 Bitmap，我们需要将其转换为 Compose 兼容的 ImageBitmap
     val appIconBitmap = sessionInfo.appIcon?.asImageBitmap()
 
     AlertDialog(
@@ -419,7 +427,6 @@ private fun ShowConfirmationDialog(
             Text(text = appLabel.toString())
         },
         text = {
-            // TODO: 您可以在此处添加更多信息，例如从 sessionInfo 解析权限
             Text(text = stringResource(R.string.confirm))
         }
     )
