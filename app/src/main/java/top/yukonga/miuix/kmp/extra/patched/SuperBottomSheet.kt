@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +76,7 @@ import top.yukonga.miuix.kmp.utils.getWindowSize
  * @param insideMargin The margin inside the [SuperBottomSheet].
  * @param defaultWindowInsetsPadding Whether to apply default window insets padding.
  * @param dragHandleColor The color of the drag handle at the top.
+ * @param allowDismiss Whether to allow dismissing the sheet by dragging the handle or back gesture.
  * @param content The [Composable] content of the [SuperBottomSheet].
  */
 @Composable
@@ -93,6 +95,7 @@ fun SuperBottomSheet(
     insideMargin: DpSize = SuperBottomSheetDefaults.insideMargin,
     defaultWindowInsetsPadding: Boolean = true,
     dragHandleColor: Color = SuperBottomSheetDefaults.dragHandleColor(),
+    allowDismiss: Boolean = true,
     content: @Composable () -> Unit
 ) {
     if (!show.value) return
@@ -121,6 +124,7 @@ fun SuperBottomSheet(
             insideMargin = insideMargin,
             defaultWindowInsetsPadding = defaultWindowInsetsPadding,
             dragHandleColor = dragHandleColor,
+            allowDismiss = allowDismiss,
             dimAlpha = dimAlpha,
             sheetHeightPx = sheetHeightPx,
             dragOffsetY = dragOffsetY,
@@ -134,27 +138,47 @@ fun SuperBottomSheet(
         onBackProgressed = { event ->
             coroutineScope.launch {
                 // Calculate offset based on back progress
-                val maxOffset = if (sheetHeightPx.value > 0) {
-                    sheetHeightPx.value.toFloat()
+                val maxOffset = if (sheetHeightPx.intValue > 0) {
+                    sheetHeightPx.intValue.toFloat()
                 } else {
                     500f
                 }
                 val offset = event.progress * maxOffset
-                dragOffsetY.snapTo(offset)
+
+                // Apply damping if dismiss is disabled
+                val finalOffset = if (!allowDismiss) {
+                    offset * 0.1f // Apply same damping as drag
+                } else {
+                    offset
+                }
+                dragOffsetY.snapTo(finalOffset)
 
                 // Update dim alpha
-                dimAlpha.value = 1f - event.progress
+                if (allowDismiss) {
+                    dimAlpha.floatValue = 1f - event.progress
+                }
             }
         },
         onBackCancelled = {
             coroutineScope.launch {
                 // Reset to original position
                 dragOffsetY.animateTo(0f, animationSpec = tween(durationMillis = 150))
-                dimAlpha.value = 1f
+                dimAlpha.floatValue = 1f
             }
         },
         onBack = {
-            currentOnDismissRequest?.invoke()
+            if (allowDismiss) {
+                // If dismiss is allowed, call the request.
+                // The request will set show.value = false.
+                currentOnDismissRequest?.invoke()
+            } else {
+                // If dismiss is not allowed, manually animate back,
+                // just like onBackCancelled.
+                coroutineScope.launch {
+                    dragOffsetY.animateTo(0f, animationSpec = tween(durationMillis = 150))
+                    dimAlpha.floatValue = 1f
+                }
+            }
         }
     )
 }
@@ -172,6 +196,7 @@ private fun SuperBottomSheetContent(
     insideMargin: DpSize,
     defaultWindowInsetsPadding: Boolean,
     dragHandleColor: Color,
+    allowDismiss: Boolean,
     dimAlpha: MutableState<Float>,
     sheetHeightPx: MutableState<Int>,
     dragOffsetY: Animatable<Float, *>,
@@ -187,7 +212,7 @@ private fun SuperBottomSheetContent(
     val statusBars = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val captionBar = WindowInsets.captionBar.asPaddingValues().calculateTopPadding()
     val displayCutout = WindowInsets.displayCutout.asPaddingValues().calculateTopPadding()
-    val statusBarHeight = remember { with(density) { maxOf(statusBars, captionBar, displayCutout) } }
+    val statusBarHeight = remember { maxOf(statusBars, captionBar, displayCutout) }
 
     val rootBoxModifier = Modifier
         .pointerInput(onDismissRequest) {
@@ -212,6 +237,7 @@ private fun SuperBottomSheetContent(
             insideMargin = insideMargin,
             defaultWindowInsetsPadding = defaultWindowInsetsPadding,
             dragHandleColor = dragHandleColor,
+            allowDismiss = allowDismiss,
             windowHeight = windowHeight,
             statusBarHeight = statusBarHeight,
             sheetHeightPx = sheetHeightPx,
@@ -237,6 +263,7 @@ private fun SuperBottomSheetColumn(
     insideMargin: DpSize,
     defaultWindowInsetsPadding: Boolean,
     dragHandleColor: Color,
+    allowDismiss: Boolean,
     windowHeight: Dp,
     statusBarHeight: Dp,
     sheetHeightPx: MutableState<Int>,
@@ -267,7 +294,7 @@ private fun SuperBottomSheetColumn(
                     .align(Alignment.BottomCenter)
                     .widthIn(max = sheetMaxWidth)
                     .fillMaxWidth()
-                    .height(with(density) { overscrollOffsetPx.toDp() })
+                    .height(with(density) { overscrollOffsetPx.toDp() } + 1.dp)
                     .padding(horizontal = outsideMargin.width)
                     .background(backgroundColor)
             )
@@ -303,6 +330,7 @@ private fun SuperBottomSheetColumn(
             // Drag handle area
             DragHandleArea(
                 dragHandleColor = dragHandleColor,
+                allowDismiss = allowDismiss,
                 windowHeight = windowHeight,
                 sheetHeightPx = sheetHeightPx,
                 dragOffsetY = dragOffsetY,
@@ -328,6 +356,7 @@ private fun SuperBottomSheetColumn(
 @Composable
 private fun DragHandleArea(
     dragHandleColor: Color,
+    allowDismiss: Boolean,
     windowHeight: Dp,
     sheetHeightPx: MutableState<Int>,
     dragOffsetY: Animatable<Float, *>,
@@ -340,17 +369,19 @@ private fun DragHandleArea(
     val isPressing = remember { mutableFloatStateOf(0f) }
     val pressScale = remember { Animatable(1f) }
     val pressWidth = remember { Animatable(45f) }
+    val velocityTracker = remember { VelocityTracker() }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(24.dp)
-            .pointerInput(Unit) {
+            .pointerInput(allowDismiss) {
                 detectVerticalDragGestures(
                     onDragStart = {
                         coroutineScope.launch {
                             dragStartOffset.floatValue = dragOffsetY.value
                             dragOffsetY.snapTo(dragOffsetY.value)
+                            velocityTracker.resetTracking()
                             // Animate press effect
                             isPressing.floatValue = 1f
                             launch {
@@ -386,10 +417,13 @@ private fun DragHandleArea(
 
                             val currentOffset = dragOffsetY.value
                             val dragDelta = currentOffset - dragStartOffset.floatValue
+                            val velocity = velocityTracker.calculateVelocity().y
+                            val velocityThreshold = 500f
+                            val dismissThresholdPx = with(density) { 150.dp.toPx() }
 
                             when {
-                                // Dragged down significantly -> dismiss
-                                dragDelta > 150f -> {
+                                // Dragged far enough down or has strong downward velocity -> dismiss
+                                allowDismiss && (dragDelta >= dismissThresholdPx || (velocity < -velocityThreshold && dragDelta > 0)) -> {
                                     onDismissRequest?.invoke()
                                     val windowHeightPx = windowHeight.value * density.density
                                     dragOffsetY.animateTo(
@@ -397,7 +431,15 @@ private fun DragHandleArea(
                                         animationSpec = tween(durationMillis = 250)
                                     )
                                 }
-                                // Reset to original position (including overscroll bounce back)
+                                // Has strong upward velocity -> continue to expand
+                                velocity > velocityThreshold -> {
+                                    dragOffsetY.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = tween(durationMillis = 250)
+                                    )
+                                    dimAlpha.value = 1f
+                                }
+                                // Not dragged far enough -> reset to original position
                                 else -> {
                                     dragOffsetY.animateTo(
                                         targetValue = 0f,
@@ -408,30 +450,33 @@ private fun DragHandleArea(
                             }
                         }
                     },
-                    onVerticalDrag = { _, dragAmount ->
+                    onVerticalDrag = { change, dragAmount ->
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+
                         coroutineScope.launch {
                             val newOffset = dragOffsetY.value + dragAmount
 
-                            // Apply damping effect when dragging upward (negative offset)
                             val finalOffset = if (newOffset < 0) {
-                                // Overscroll effect: reduce drag amount with damping
-                                val dampingFactor = 0.1f // Adjust this value for more/less resistance
+                                // Dragging UP (Overscroll)
+                                val dampingFactor = 0.1f
                                 val dampedAmount = dragAmount * dampingFactor
                                 (dragOffsetY.value + dampedAmount).coerceAtMost(0f)
+                            } else if (newOffset >= 0 && !allowDismiss) {
+                                // Dragging DOWN (Overscroll, dismiss disabled)
+                                val dampingFactor = 0.1f
+                                val dampedAmount = if (dragAmount > 0) dragAmount * dampingFactor else dragAmount
+                                (dragOffsetY.value + dampedAmount).coerceAtLeast(0f)
                             } else {
-                                // Normal drag downward
+                                // Dragging DOWN (Normal, dismiss enabled)
                                 newOffset
                             }
 
                             dragOffsetY.snapTo(finalOffset)
 
-                            // Update dim alpha based on downward drag only
                             val thresholdPx = if (sheetHeightPx.value > 0) sheetHeightPx.value.toFloat() else 500f
-                            val alpha = if (finalOffset >= 0) {
-                                // Dragging down - reduce alpha
+                            val alpha = if (finalOffset >= 0 && allowDismiss) {
                                 1f - (finalOffset / thresholdPx).coerceIn(0f, 1f)
                             } else {
-                                // Dragging up or at base position - keep alpha at 1
                                 1f
                             }
                             dimAlpha.value = alpha

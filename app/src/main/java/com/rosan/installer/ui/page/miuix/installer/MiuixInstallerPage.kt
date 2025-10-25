@@ -149,11 +149,13 @@ fun MiuixInstallerPage(
         },
         title = "安装应用",
         insideMargin = DpSize(16.dp, 16.dp),
+        allowDismiss = viewModel.isDismissible,
         onDismissRequest = {
-            showBottomSheet.value = !showBottomSheet.value
-            scope.launch {
-                delay(SHEET_ANIMATION_DURATION) // Wait for sheet animation
-                if (viewModel.isDismissible) {
+            if (viewModel.isDismissible) {
+                // If it is dismissible, then proceed to close the sheet.
+                showBottomSheet.value = !showBottomSheet.value
+                scope.launch {
+                    delay(SHEET_ANIMATION_DURATION) // Wait for sheet animation
                     if (viewModel.disableNotificationOnDismiss) {
                         viewModel.dispatch(InstallerViewAction.Close)
                     } else {

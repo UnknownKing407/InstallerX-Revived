@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -67,6 +68,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.extra.SpinnerEntry
 import top.yukonga.miuix.kmp.extra.SpinnerMode
 import top.yukonga.miuix.kmp.extra.SuperArrow
@@ -376,12 +378,14 @@ fun MiuixNavigationItemWidget(
     icon: ImageVector? = null,
     title: String,
     description: String,
+    insideMargin: PaddingValues = BasicComponentDefaults.InsideMargin,
     onClick: () -> Unit
 ) {
     // Call the BaseWidget and pass the parameters accordingly.
     SuperArrow(
         title = title,
         summary = description,
+        insideMargin = insideMargin,
         onClick = onClick
     )
 }

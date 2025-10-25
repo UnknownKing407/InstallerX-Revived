@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -42,6 +44,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -61,14 +65,22 @@ import com.rosan.installer.data.app.model.entity.DataType
 import com.rosan.installer.data.app.model.entity.InstalledAppInfo
 import com.rosan.installer.data.app.model.entity.PackageAnalysisResult
 import com.rosan.installer.data.app.model.entity.SignatureMatchStatus
+import com.rosan.installer.data.app.util.rememberInstallOptions
 import com.rosan.installer.data.app.util.sortedBest
+import com.rosan.installer.data.installer.model.entity.ExtendedMenuEntity
+import com.rosan.installer.data.installer.model.entity.ExtendedMenuItemEntity
 import com.rosan.installer.data.installer.model.entity.SelectInstallEntity
 import com.rosan.installer.data.installer.repo.InstallerRepo
 import com.rosan.installer.data.recycle.util.openAppPrivileged
+import com.rosan.installer.data.settings.model.datastore.entity.NamedPackage
+import com.rosan.installer.data.settings.model.room.entity.ConfigEntity
 import com.rosan.installer.ui.icons.AppIcons
 import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewAction
+import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewAction.SetInstaller
+import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewAction.SetTargetUser
 import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewModel
 import com.rosan.installer.ui.page.main.installer.dialog.InstallerViewState
+import com.rosan.installer.ui.page.main.installer.dialog.inner.InstallExtendedMenuAction
 import com.rosan.installer.ui.page.miuix.widgets.MiuixErrorTextBlock
 import com.rosan.installer.ui.page.miuix.widgets.MiuixNavigationItemWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixSwitchWidget
@@ -86,9 +98,14 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.extra.SpinnerEntry
+import top.yukonga.miuix.kmp.extra.SpinnerMode
+import top.yukonga.miuix.kmp.extra.SuperSpinner
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.BackHandler
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 @Composable
 fun MiuixSheetContent(
@@ -136,6 +153,10 @@ fun MiuixSheetContent(
 
             is InstallerViewState.InstallChoice -> {
                 InstallChoiceContent(installer, viewModel)
+            }
+
+            is InstallerViewState.InstallExtendedMenu -> {
+                InstallExtendedMenuContent(installer, viewModel)
             }
 
             is InstallerViewState.InstallPrepare -> {
@@ -212,6 +233,232 @@ fun MiuixSheetContent(
 }
 
 @Composable
+private fun InstallExtendedMenuContent(
+    installer: InstallerRepo,
+    viewModel: InstallerViewModel
+) {
+    // val currentPackageName by viewModel.currentPackageName.collectAsState()
+    // val containerType =
+    //     installer.analysisResults.find { it.packageName == currentPackageName }?.appEntities?.first()?.app?.containerType
+    val installOptions = rememberInstallOptions(installer.config.authorizer)
+    val installFlags by viewModel.installFlags.collectAsState()
+    val managedPackages by viewModel.managedInstallerPackages.collectAsState()
+    val selectedInstallerPackageName by viewModel.selectedInstaller.collectAsState()
+    val defaultInstallerFromSettings by viewModel.defaultInstallerFromSettings.collectAsState()
+    val selectedInstaller = remember(selectedInstallerPackageName, managedPackages) {
+        managedPackages.find { it.packageName == selectedInstallerPackageName }
+    }
+    val availableUsers by viewModel.availableUsers.collectAsState()
+    val selectedUserId by viewModel.selectedUserId.collectAsState()
+    val customizeUserEnabled = installer.config.enableCustomizeUser
+    val defaultInstallerHintText = stringResource(id = R.string.config_follow_settings)
+    val menuEntities = remember(installOptions, selectedInstaller, customizeUserEnabled, selectedUserId, availableUsers) {
+        buildList {
+            // Installer selection
+            if (installer.config.authorizer == ConfigEntity.Authorizer.Root ||
+                installer.config.authorizer == ConfigEntity.Authorizer.Shizuku
+            ) {
+                add(
+                    ExtendedMenuEntity(
+                        action = InstallExtendedMenuAction.CustomizeInstaller,
+                        menuItem = ExtendedMenuItemEntity(
+                            nameResourceId = R.string.config_installer,
+                            icon = AppIcons.InstallSource,
+                            action = null
+                        )
+                    )
+                )
+            }
+
+            // User selection
+            if ((installer.config.authorizer == ConfigEntity.Authorizer.Root ||
+                        installer.config.authorizer == ConfigEntity.Authorizer.Shizuku
+                        ) && customizeUserEnabled
+            ) {
+                add(
+                    ExtendedMenuEntity(
+                        action = InstallExtendedMenuAction.CustomizeUser,
+                        menuItem = ExtendedMenuItemEntity(
+                            nameResourceId = R.string.config_target_user,
+                            icon = AppIcons.InstallUser,
+                            action = null
+                        )
+                    )
+                )
+            }
+
+            // Dynamic install options
+            if (installer.config.authorizer == ConfigEntity.Authorizer.Root ||
+                installer.config.authorizer == ConfigEntity.Authorizer.Shizuku
+            ) {
+                installOptions.forEach { option ->
+                    add(
+                        ExtendedMenuEntity(
+                            action = InstallExtendedMenuAction.InstallOption,
+                            menuItem = ExtendedMenuItemEntity(
+                                nameResourceId = option.labelResource,
+                                descriptionResourceId = option.descResource,
+                                icon = null,
+                                action = option
+                            )
+                        )
+                    )
+                }
+            }
+        }.toMutableStateList()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(modifier = Modifier.weight(1f, fill = false)) {
+            ExtendedMenuLazyList(
+                entities = menuEntities,
+                viewModel = viewModel,
+                installFlags = installFlags,
+                managedPackages = managedPackages,
+                selectedInstallerPackageName = selectedInstallerPackageName,
+                defaultInstallerFromSettings = defaultInstallerFromSettings,
+                availableUsers = availableUsers,
+                selectedUserId = selectedUserId
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = { viewModel.dispatch(InstallerViewAction.Close) },
+                text = stringResource(R.string.cancel),
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = { viewModel.dispatch(InstallerViewAction.InstallPrepare) },
+                text = stringResource(R.string.next),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExtendedMenuLazyList(
+    entities: SnapshotStateList<ExtendedMenuEntity>,
+    viewModel: InstallerViewModel,
+    installFlags: Int,
+    managedPackages: List<NamedPackage>,
+    selectedInstallerPackageName: String?,
+    defaultInstallerFromSettings: String?,
+    availableUsers: Map<Int, String>,
+    selectedUserId: Int
+) {
+    val cardColor = if (isSystemInDarkTheme()) Color(0xFF434343) else Color.White
+    val context = LocalContext.current
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardColors(
+            color = cardColor,
+            contentColor = MiuixTheme.colorScheme.onSurface
+        )
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollEndHaptic()
+                .overScrollVertical(),
+            overscrollEffect = null,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(entities, key = { it.menuItem.nameResourceId }) { item ->
+                val option = item.menuItem.action
+                val isSelected = option?.let { (installFlags and it.value) != 0 } ?: false
+
+                when (item.action) {
+                    is InstallExtendedMenuAction.InstallOption -> {
+                        MiuixSwitchWidget(
+                            title = stringResource(item.menuItem.nameResourceId),
+                            description = item.menuItem.descriptionResourceId?.let { stringResource(it) },
+                            checked = isSelected,
+                            onCheckedChange = { checked ->
+                                option?.let { opt ->
+                                    viewModel.toggleInstallFlag(opt.value, checked)
+                                }
+                            }
+                        )
+                    }
+
+                    is InstallExtendedMenuAction.CustomizeInstaller -> {
+                        val installerFollowSettingsText = stringResource(id = R.string.config_follow_settings)
+                        val installerEntries = remember(managedPackages, installerFollowSettingsText) {
+                            listOf(SpinnerEntry(title = installerFollowSettingsText)) +
+                                    managedPackages.map { SpinnerEntry(title = it.name) }
+                        }
+                        val selectedInstallerIndex = remember(selectedInstallerPackageName, managedPackages) {
+                            if (selectedInstallerPackageName == defaultInstallerFromSettings || selectedInstallerPackageName == null) {
+                                0 // "Follow Settings" is at index 0
+                            } else {
+                                managedPackages.indexOfFirst { it.packageName == selectedInstallerPackageName } + 1 // Offset by 1 for "Follow Settings"
+                            }
+                        }.coerceAtLeast(0) // Ensure index is not -1
+
+                        SuperSpinner(
+                            mode = SpinnerMode.AlwaysOnRight,
+                            title = stringResource(R.string.config_installer),
+                            items = installerEntries,
+                            selectedIndex = selectedInstallerIndex,
+                            onSelectedIndexChange = { newIndex ->
+                                val selectedPackageName = if (newIndex == 0) {
+                                    defaultInstallerFromSettings // Select "Follow Settings" -> use default value
+                                } else {
+                                    managedPackages.getOrNull(newIndex - 1)?.packageName
+                                }
+                                viewModel.dispatch(SetInstaller(selectedPackageName))
+                            }
+                        )
+                    }
+
+                    is InstallExtendedMenuAction.CustomizeUser -> {
+                        val userEntries = remember(availableUsers) {
+                            // Ensure consistent order, e.g., sort by ID
+                            availableUsers.entries.sortedBy { it.key }.map { (id, name) ->
+                                SpinnerEntry(title = "$name ($id)")
+                            }
+                        }
+                        val userKeysSorted = remember(availableUsers) {
+                            availableUsers.keys.sorted()
+                        }
+                        val selectedUserIndex = remember(selectedUserId, userKeysSorted) {
+                            userKeysSorted.indexOf(selectedUserId).coerceAtLeast(0)
+                        }
+
+                        SuperSpinner(
+                            mode = SpinnerMode.AlwaysOnRight,
+                            title = stringResource(R.string.config_target_user),
+                            items = userEntries,
+                            selectedIndex = selectedUserIndex,
+                            onSelectedIndexChange = { newIndex ->
+                                userKeysSorted.getOrNull(newIndex)?.let { userId ->
+                                    viewModel.dispatch(SetTargetUser(userId))
+                                }
+                            }
+                        )
+                    }
+
+                    else -> null
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun InstallChoiceContent(
     installer: InstallerRepo,
     viewModel: InstallerViewModel
@@ -233,8 +480,8 @@ private fun InstallChoiceContent(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Title and Subtitle
-        Text(stringResource(titleRes), style = MiuixTheme.textStyles.title1)
+        /* // Title and Subtitle
+         Text(stringResource(titleRes), style = MiuixTheme.textStyles.title1)*/
         when (containerType) {
             DataType.MIXED_MODULE_APK -> Text(
                 "请选择安装类型",
@@ -267,7 +514,6 @@ private fun InstallChoiceContent(
                 isMultiApk = isMultiApk
             )
         }
-
 
         // Buttons
         if (!isModuleApk) {
@@ -309,6 +555,11 @@ private fun ChoiceLazyList(
         val moduleSelectableEntity = allSelectableEntities.firstOrNull { it.app is AppEntity.ModuleEntity }
 
         LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollEndHaptic()
+                .overScrollVertical(),
+            overscrollEffect = null,
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
@@ -375,7 +626,11 @@ private fun ChoiceLazyList(
         }
     } else if (isMultiApk) {
         LazyColumn(
-            modifier = Modifier.wrapContentSize(),
+            modifier = Modifier
+                .wrapContentSize()
+                .scrollEndHaptic()
+                .overScrollVertical(),
+            overscrollEffect = null,
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
@@ -390,7 +645,11 @@ private fun ChoiceLazyList(
     } else { // Single-Package Split Mode
         val entities = analysisResults.firstOrNull()?.appEntities ?: emptyList()
         LazyColumn(
-            modifier = Modifier.wrapContentSize(),
+            modifier = Modifier
+                .wrapContentSize()
+                .scrollEndHaptic()
+                .overScrollVertical(),
+            overscrollEffect = null,
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
@@ -605,18 +864,18 @@ private fun ChoiceItemContent(app: AppEntity) {
             is AppEntity.BaseEntity -> {
                 Text(
                     app.label ?: app.packageName,
-                    style = MiuixTheme.textStyles.title2,
+                    style = MiuixTheme.textStyles.title4,
                 )
                 Text(
                     app.packageName,
-                    style = MiuixTheme.textStyles.body2,
+                    style = MiuixTheme.textStyles.subtitle,
                     color = MiuixTheme.colorScheme.onSurface,
                     maxLines = 1,
                     modifier = Modifier.basicMarquee()
                 )
                 Text(
                     text = stringResource(R.string.installer_version, app.versionName, app.versionCode),
-                    style = MiuixTheme.textStyles.body1,
+                    style = MiuixTheme.textStyles.body2,
                     color = MiuixTheme.colorScheme.onSurface
                 )
             }
@@ -624,11 +883,11 @@ private fun ChoiceItemContent(app: AppEntity) {
             is AppEntity.SplitEntity -> {
                 Text(
                     app.splitName.asUserReadableSplitName(),
-                    style = MiuixTheme.textStyles.title2,
+                    style = MiuixTheme.textStyles.title4,
                 )
                 Text(
                     text = stringResource(R.string.installer_file_name, app.name),
-                    style = MiuixTheme.textStyles.body1,
+                    style = MiuixTheme.textStyles.body2,
                     color = MiuixTheme.colorScheme.onSurface,
                     maxLines = 1
                 )
@@ -649,7 +908,6 @@ private fun ChoiceItemContent(app: AppEntity) {
         }
     }
 }
-
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -809,33 +1067,36 @@ private fun InstallPrepareContent(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = 8.dp),
                     colors = CardColors(
                         color = if (isSystemInDarkTheme()) Color(0xFF434343) else Color.White,
                         contentColor = MiuixTheme.colorScheme.onSurface
                     )
                 ) {
                     Column {
-                        // 1. Permissions List (Placeholder)
+                        // Permissions List
                         MiuixNavigationItemWidget(
-                            title = "权限列表",
-                            description = "查看应用请求的权限",
-                            onClick = { /* TODO: Implement action */ },
+                            title = stringResource(R.string.permission_list),
+                            description = stringResource(R.string.permission_list_desc),
+                            insideMargin = PaddingValues(12.dp),
+                            onClick = { viewModel.toast("To be implemented") },
                         )
 
-                        // 2. Install Options (Placeholder)
+                        // Install Options
                         MiuixNavigationItemWidget(
-                            title = "安装选项",
-                            description = "配置安装参数，如下放权限、允许降级",
-                            onClick = { /* TODO: Implement action */ }
+                            title = stringResource(R.string.config_label_install_options),
+                            description = stringResource(R.string.config_label_install_options_desc),
+                            insideMargin = PaddingValues(12.dp),
+                            onClick = { viewModel.dispatch(InstallerViewAction.InstallExtendedMenu) }
                         )
 
-                        // 3. Select Splits (Conditional)
+                        // Select Splits
                         val hasSplits = currentPackage.appEntities.size > 1
                         if (hasSplits) {
                             MiuixNavigationItemWidget(
-                                title = "选择分包",
-                                description = "重新选择要安装的 APKS 分包",
+                                title = stringResource(R.string.installer_select_split),
+                                description = stringResource(R.string.installer_select_split_desc),
+                                insideMargin = PaddingValues(12.dp),
                                 onClick = { viewModel.dispatch(InstallerViewAction.InstallChoice) },
                             )
                         }
@@ -848,7 +1109,9 @@ private fun InstallPrepareContent(
         item {
             TextButton(
                 onClick = { isExpanded = !isExpanded },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp), // Added top padding
                 text = if (isExpanded) "收起" else "展开更多"
             )
         }
@@ -858,7 +1121,7 @@ private fun InstallPrepareContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 24.dp),
+                    .padding(top = 8.dp, bottom = 24.dp), // Changed vertical padding
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
