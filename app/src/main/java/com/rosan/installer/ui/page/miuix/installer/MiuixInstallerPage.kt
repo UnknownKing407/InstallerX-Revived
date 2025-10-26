@@ -68,7 +68,30 @@ fun MiuixInstallerPage(
         backgroundColor = if (isSystemInDarkTheme()) Color(0xFF242424) else Color(0xFFF7F7F7),
         leftAction = {
             when (currentState) {
-                is InstallerViewState.InstallChoice,
+                is InstallerViewState.InstallChoice -> {
+                    // Check the new flag from ViewModel
+                    if (viewModel.navigatedFromPrepareToChoice) {
+                        // Came from Prepare (re-selecting splits) -> Show Back icon, go back to Prepare
+                        MiuixBackButton(
+                            icon = MiuixIcons.Useful.Back,
+                            onClick = { viewModel.dispatch(InstallerViewAction.InstallPrepare) }
+                        )
+                    } else {
+                        // Initial choice or other origin -> Show Cancel icon, force close
+                        MiuixBackButton(
+                            icon = MiuixIcons.Useful.Cancel,
+                            onClick = {
+                                // Directly close, ignoring isDismissible
+                                showBottomSheet.value = false
+                                scope.launch {
+                                    delay(SHEET_ANIMATION_DURATION)
+                                    viewModel.dispatch(InstallerViewAction.Close)
+                                }
+                            }
+                        )
+                    }
+                }
+
                 is InstallerViewState.InstallFailed,
                 is InstallerViewState.InstallSuccess,
                 is InstallerViewState.AnalyseFailed,
@@ -93,20 +116,26 @@ fun MiuixInstallerPage(
                             if (showSettings) {
                                 viewModel.dispatch(InstallerViewAction.HideMiuixSheetRightActionSettings)
                             } else {
-                                showBottomSheet.value = !showBottomSheet.value
-                                scope.launch {
-                                    delay(SHEET_ANIMATION_DURATION)
-                                    if (viewModel.isDismissible)
+                                if (viewModel.isDismissible) {
+                                    showBottomSheet.value = !showBottomSheet.value
+                                    scope.launch {
+                                        delay(SHEET_ANIMATION_DURATION)
                                         viewModel.dispatch(InstallerViewAction.Close)
+                                    }
                                 }
                             }
                         }
                     )
                 }
 
-                else -> {
-                    Spacer(Modifier.size(48.dp))
+                is InstallerViewState.InstallExtendedMenu -> {
+                    MiuixBackButton(
+                        icon = MiuixIcons.Useful.Back,
+                        onClick = { viewModel.dispatch(InstallerViewAction.InstallPrepare) }
+                    )
                 }
+
+                else -> null
             }
         },
         rightAction = {
@@ -133,7 +162,7 @@ fun MiuixInstallerPage(
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 context.startActivity(intent)
                             }
-                            viewModel.dispatch(InstallerViewAction.Background)
+                            viewModel.dispatch(InstallerViewAction.Close)
                         }) {
                         Icon(
                             imageVector = MiuixIcons.Useful.Info,
