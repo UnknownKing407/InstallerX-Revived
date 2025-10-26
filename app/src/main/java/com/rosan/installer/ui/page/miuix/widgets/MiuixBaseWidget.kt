@@ -1,123 +1,87 @@
 package com.rosan.installer.ui.page.miuix.widgets
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.LocalContentColor
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.ui.graphics.vector.ImageVector
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.Checkbox
+import top.yukonga.miuix.kmp.basic.Switch
 
-/**
- * A base widget styled after MIUIX components.
- *
- * This component arranges content in a row, typically with optional content at the start,
- * a main title and summary section, and optional content at the end. It retains the
- * core functionalities like error state, overlay content, and haptic feedback from the original design.
- *
- * @param title The main text to be displayed.
- * @param summary Optional description text displayed below the title.
- * @param startContent Optional composable to be placed at the beginning of the widget.
- * @param endContent Optional composable to be placed at the end of the widget.
- * @param foreContent Optional composable that overlays the title and summary section.
- * @param enabled Controls the enabled state of the component. When false, it becomes non-clickable and visually disabled.
- * @param isError If true, the summary text will be displayed in the error color.
- * @param onClick The callback to be invoked when this widget is clicked.
- */
 @Composable
-fun MiuixBaseWidget(
+fun MiuixSwitchWidget(
+    icon: ImageVector? = null,
     title: String,
-    summary: String? = null,
-    startContent: @Composable (() -> Unit)? = null,
-    endContent: @Composable (RowScope.() -> Unit)? = null,
-    foreContent: @Composable (BoxScope.() -> Unit) = {},
+    description: String? = null,
     enabled: Boolean = true,
-    isError: Boolean = false,
-    onClick: () -> Unit = {},
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+    // Note: The 'isError' parameter is removed as it's not supported by the standard BasicComponent.
 ) {
-    // Set alpha for disabled state to apply to all children
-    val contentAlpha = if (enabled) 1f else 0.38f
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                enabled = enabled,
-                onClick = { onClick() }
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Provide the alpha to all child composables
-        CompositionLocalProvider(LocalContentColor provides LocalContentColor.current.copy(alpha = contentAlpha)) {
-            // Start Content (e.g., Icon)
-            if (startContent != null) {
-                Box(modifier = Modifier.padding(end = 16.dp)) {
-                    startContent()
-                }
-            }
-
-            // Middle Content (Title and Summary)
-            Box(
-                modifier = Modifier.weight(1f)
-            ) {
-                Column {
-                    // Title
-                    Text(
-                        text = title,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        style = MiuixTheme.textStyles.title2,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.alpha(contentAlpha) // Apply alpha directly for clarity
-                    )
-
-                    // Summary
-                    summary?.let {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        val summaryColor = when {
-                            isError -> MiuixTheme.colorScheme.disabledPrimary
-                            else -> MiuixTheme.colorScheme.onSurfaceVariantActions
-                        }
-                        Text(
-                            text = it,
-                            color = summaryColor,
-                            style = MiuixTheme.textStyles.body2,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.alpha(contentAlpha) // Apply alpha directly
-                        )
-                    }
-                }
-                // Foreground content that overlays title and summary
-                foreContent()
-            }
-
-            // End Content (e.g., Checkbox, Switch, Arrow)
-            if (endContent != null) {
-                Spacer(Modifier.width(16.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    endContent()
-                }
-            }
+    // This action makes the entire row clickable to toggle the switch.
+    val toggleAction = {
+        if (enabled) {
+            onCheckedChange(!checked)
         }
     }
+
+    BasicComponent(
+        title = title,
+        summary = description,
+        enabled = enabled,
+        onClick = toggleAction,
+        rightActions = {
+            // Place the Switch component at the end of the row.
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled
+            )
+        }
+    )
+}
+
+/**
+ * A BasicComponent variant that displays a Checkbox as its right action.
+ * The entire row is clickable to toggle the checked state.
+ *
+ * @param icon Optional icon for the component (Note: not passed to BasicComponent,
+ * matching MiuixSwitchWidget's provided structure).
+ * @param title The main text title.
+ * @param description The supporting text (summary).
+ * @param enabled Controls the enabled state of the component and the Checkbox.
+ * @param checked The current checked state of the Checkbox.
+ * @param onCheckedChange A lambda called when the checked state changes.
+ */
+@Composable
+fun MiuixCheckboxWidget(
+    icon: ImageVector? = null, // Following your MiuixSwitchWidget signature
+    title: String,
+    description: String? = null,
+    enabled: Boolean = true,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    // This action makes the entire row clickable to toggle the checkbox.
+    val toggleAction = {
+        if (enabled) {
+            onCheckedChange(!checked)
+        }
+    }
+
+    BasicComponent(
+        // Note: 'icon' parameter is not used here, to match the
+        // structure of the MiuixSwitchWidget you provided.
+        // If your BasicComponent accepts an icon, you should pass it here.
+        title = title,
+        summary = description,
+        enabled = enabled,
+        onClick = toggleAction,
+        rightActions = {
+            // Use a Checkbox instead of a Switch
+            Checkbox(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled
+            )
+        }
+    )
 }
