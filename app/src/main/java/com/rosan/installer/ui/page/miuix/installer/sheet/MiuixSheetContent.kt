@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,10 +44,8 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -64,7 +61,6 @@ import com.rosan.installer.data.app.util.rememberInstallOptions
 import com.rosan.installer.data.app.util.sortedBest
 import com.rosan.installer.data.installer.model.entity.ExtendedMenuEntity
 import com.rosan.installer.data.installer.model.entity.ExtendedMenuItemEntity
-import com.rosan.installer.data.installer.model.entity.SelectInstallEntity
 import com.rosan.installer.data.installer.repo.InstallerRepo
 import com.rosan.installer.data.recycle.util.openAppPrivileged
 import com.rosan.installer.data.settings.model.datastore.entity.NamedPackage
@@ -79,20 +75,25 @@ import com.rosan.installer.ui.page.main.installer.dialog.inner.InstallExtendedMe
 import com.rosan.installer.ui.page.miuix.widgets.MiuixCheckboxWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixErrorTextBlock
 import com.rosan.installer.ui.page.miuix.widgets.MiuixInstallChoiceTipCard
+import com.rosan.installer.ui.page.miuix.widgets.MiuixMultiApkCheckboxWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixNavigationItemWidget
 import com.rosan.installer.ui.page.miuix.widgets.MiuixSwitchWidget
 import com.rosan.installer.util.asUserReadableSplitName
+import com.rosan.installer.util.getDisplayName
+import com.rosan.installer.util.getSplitType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardColors
-import top.yukonga.miuix.kmp.basic.Checkbox
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.extra.SpinnerEntry
@@ -496,11 +497,7 @@ private fun InstallChoiceContent(
                 analysisResults = analysisResults,
                 viewModel = viewModel,
                 isModuleApk = isModuleApk,
-                isMultiApk = isMultiApk,
-                expandedPackageName = expandedPackageName,
-                onExpandToggle = { packageName ->
-                    expandedPackageName = if (expandedPackageName == packageName) null else packageName
-                }
+                isMultiApk = isMultiApk
             )
         }
 
@@ -534,9 +531,7 @@ private fun ChoiceLazyList(
     analysisResults: List<PackageAnalysisResult>,
     viewModel: InstallerViewModel,
     isModuleApk: Boolean,
-    isMultiApk: Boolean,
-    expandedPackageName: String?,
-    onExpandToggle: (String) -> Unit
+    isMultiApk: Boolean
 ) {
     val cardColor = if (isSystemInDarkTheme()) Color(0xFF434343) else Color.White
 
@@ -638,10 +633,9 @@ private fun ChoiceLazyList(
                         color = cardColor,
                         contentColor = MiuixTheme.colorScheme.onSurface
                     )
-                    // Add shape if desired
                 ) {
                     if (itemsInGroup.size == 1) {
-                        // --- Case 1: Only one option - Use MiuixCheckboxWidget inside Card ---
+                        // --- Only one option - Use MiuixCheckboxWidget inside Card ---
                         val item = itemsInGroup.first()
                         val app = item.app
                         val versionText = (app as? AppEntity.BaseEntity)?.let {
@@ -663,199 +657,171 @@ private fun ChoiceLazyList(
                             }
                         )
                     } else {
-                        // --- Case 2: Multiple options - Use Column inside Card ---
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = appLabel,
-                                style = MiuixTheme.textStyles.title4, // Or title2/title3
-                                modifier = Modifier.padding(
-                                    start = 16.dp,
-                                    end = 16.dp,
-                                    top = 12.dp,
-                                    bottom = 4.dp
-                                )
-                            )
-
-                            itemsInGroup
-                                .sortedByDescending { (it.app as? AppEntity.BaseEntity)?.versionCode ?: 0 }
-                                .forEach { item ->
-                                    val appBaseEntity = item.app as? AppEntity.BaseEntity
-                                    val titleText = if (appBaseEntity != null) {
-                                        stringResource(
-                                            R.string.installer_version,
-                                            appBaseEntity.versionName,
-                                            appBaseEntity.versionCode
-                                        )
-                                    } else {
-                                        item.app.name
-                                    }
-                                    val summaryText = appBaseEntity?.data?.getSourceTop()?.toString()?.removeSuffix("/")
-                                        ?.substringAfterLast('/')
-
-                                    MiuixCheckboxWidget(
-                                        title = titleText,
-                                        description = summaryText,
-                                        checked = item.selected,
-                                        onCheckedChange = {
-                                            viewModel.dispatch(
-                                                InstallerViewAction.ToggleSelection(
-                                                    packageName = packageResult.packageName,
-                                                    entity = item,
-                                                    isMultiSelect = false
-                                                )
-                                            )
-                                        }
+                        // --- Multiple options - Use Column inside Card ---
+                        BasicComponent(
+                            title = appLabel,
+                            summary = packageResult.packageName
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        itemsInGroup
+                            .sortedByDescending { (it.app as? AppEntity.BaseEntity)?.versionCode ?: 0 }
+                            .forEach { item ->
+                                val appBaseEntity = item.app as? AppEntity.BaseEntity
+                                val titleText = if (appBaseEntity != null) {
+                                    stringResource(
+                                        R.string.installer_version,
+                                        appBaseEntity.versionName,
+                                        appBaseEntity.versionCode
                                     )
+                                } else {
+                                    item.app.name
                                 }
-                            // Add some bottom padding inside the Column if needed
-                            Spacer(Modifier.height(4.dp))
-                        }
+                                val summaryText = appBaseEntity?.data?.getSourceTop()?.toString()?.removeSuffix("/")
+                                    ?.substringAfterLast('/')
+
+                                MiuixMultiApkCheckboxWidget(
+                                    title = titleText,
+                                    summary = summaryText,
+                                    checked = item.selected,
+                                    onCheckedChange = {
+                                        viewModel.dispatch(
+                                            InstallerViewAction.ToggleSelection(
+                                                packageName = packageResult.packageName,
+                                                entity = item,
+                                                isMultiSelect = false
+                                            )
+                                        )
+                                    }
+                                )
+                            }
                     }
                 } // End Card
             }
         }
     } else { // Single-Package Split Mode
-        val entities = analysisResults.firstOrNull()?.appEntities ?: emptyList()
+        val allEntities = analysisResults.firstOrNull()?.appEntities ?: emptyList()
+        val baseEntities =
+            allEntities.filter { it.app is AppEntity.BaseEntity || it.app is AppEntity.DexMetadataEntity }
+        val splitEntities = allEntities.filter { it.app is AppEntity.SplitEntity }
+
+        // Group splits by type
+        val groupedSplits = splitEntities
+            .groupBy { (it.app as AppEntity.SplitEntity).splitName.getSplitType() }
+            .toSortedMap(compareBy { it.ordinal }) // Sort groups by enum order
+
         LazyColumn(
             modifier = Modifier
                 .wrapContentSize()
                 .scrollEndHaptic()
                 .overScrollVertical(),
             overscrollEffect = null,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
-            itemsIndexed(entities, key = { _, it -> it.app.name + it.app.packageName }) { _, item ->
-                MiuixSingleItemCard(
-                    item = item,
-                    cardColor = cardColor,
-                    onClick = {
-                        viewModel.dispatch(
-                            InstallerViewAction.ToggleSelection(
-                                packageName = item.app.packageName,
-                                entity = item,
-                                isMultiSelect = true
-                            )
+            // --- Base Application ---
+            if (baseEntities.isNotEmpty()) {
+                item {
+                    SmallTitle(
+                        stringResource(R.string.split_name_base_group_title),
+                        insideMargin = PaddingValues(16.dp, 8.dp)
+                    )
+                }
+                itemsIndexed(baseEntities, key = { _, it -> it.app.name + it.app.packageName }) { _, item ->
+                    val (title, description) = when (val app = item.app) {
+                        is AppEntity.BaseEntity -> {
+                            val desc =
+                                "${app.packageName}\n${
+                                    stringResource(
+                                        R.string.installer_version,
+                                        app.versionName,
+                                        app.versionCode
+                                    )
+                                }"
+                            (app.label ?: app.packageName) to desc
+                        }
+
+                        is AppEntity.DexMetadataEntity -> {
+                            app.dmName to app.packageName
+                        }
+
+                        else -> item.app.name to item.app.packageName
+                    }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardColors(
+                            color = cardColor,
+                            contentColor = MiuixTheme.colorScheme.onSurface
+                        ),
+                        pressFeedbackType = PressFeedbackType.Sink
+                    ) {
+                        MiuixCheckboxWidget(
+                            title = title,
+                            description = description,
+                            checked = item.selected,
+                            onCheckedChange = {
+                                viewModel.dispatch(
+                                    InstallerViewAction.ToggleSelection(
+                                        packageName = item.app.packageName,
+                                        entity = item,
+                                        isMultiSelect = true
+                                    )
+                                )
+                            }
                         )
                     }
-                )
+                }
+            }
+
+            // --- Grouped Splits ---
+            groupedSplits.forEach { (splitType, entitiesInGroup) ->
+                if (entitiesInGroup.isEmpty()) return@forEach
+
+                item {
+                    SmallTitle(
+                        text = splitType.getDisplayName(),
+                        insideMargin = PaddingValues(16.dp, 8.dp)
+                    )
+                }
+
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardColors(
+                            color = cardColor,
+                            contentColor = MiuixTheme.colorScheme.onSurface
+                        )
+                    ) {
+                        Column {
+                            entitiesInGroup.forEach { item ->
+                                val app = item.app as AppEntity.SplitEntity
+                                val title = app.splitName.asUserReadableSplitName()
+                                val description = stringResource(R.string.installer_file_name, app.name)
+
+                                MiuixCheckboxWidget(
+                                    title = title,
+                                    description = description,
+                                    checked = item.selected,
+                                    onCheckedChange = {
+                                        viewModel.dispatch(
+                                            InstallerViewAction.ToggleSelection(
+                                                packageName = item.app.packageName,
+                                                entity = item,
+                                                isMultiSelect = true
+                                            )
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun MiuixSingleItemCard(
-    item: SelectInstallEntity,
-    cardColor: Color,
-    onClick: () -> Unit
-) {
-    val haptic = LocalHapticFeedback.current
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.ToggleOn)
-            onClick()
-        },
-        colors = CardColors(
-            color = cardColor,
-            contentColor = MiuixTheme.colorScheme.onSurface
-        ),
-        pressFeedbackType = PressFeedbackType.Sink
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = item.selected,
-                onCheckedChange = null,
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            ChoiceItemContent(app = item.app)
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ChoiceItemContent(app: AppEntity) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(end = 12.dp)
-    ) {
-        when (app) {
-            is AppEntity.BaseEntity -> {
-                Text(
-                    app.label ?: app.packageName,
-                    style = MiuixTheme.textStyles.title4,
-                )
-                Text(
-                    app.packageName,
-                    style = MiuixTheme.textStyles.subtitle,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    modifier = Modifier.basicMarquee()
-                )
-                Text(
-                    text = stringResource(R.string.installer_version, app.versionName, app.versionCode),
-                    style = MiuixTheme.textStyles.body2,
-                    color = MiuixTheme.colorScheme.onSurface
-                )
-            }
-
-            is AppEntity.SplitEntity -> {
-                Text(
-                    app.splitName.asUserReadableSplitName(),
-                    style = MiuixTheme.textStyles.title4,
-                )
-                Text(
-                    text = stringResource(R.string.installer_file_name, app.name),
-                    style = MiuixTheme.textStyles.body2,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    maxLines = 1
-                )
-            }
-
-            is AppEntity.DexMetadataEntity -> {
-                Text(app.dmName, style = MiuixTheme.textStyles.title2)
-                Text(
-                    app.packageName,
-                    style = MiuixTheme.textStyles.body2,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    modifier = Modifier.basicMarquee()
-                )
-            }
-            // Should never happen!
-            else -> Unit
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MultiApkItemContent(app: AppEntity.BaseEntity) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(end = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        Text(
-            text = stringResource(R.string.installer_version, app.versionName, app.versionCode),
-            style = MiuixTheme.textStyles.title2
-        )
-        Text(
-            text = app.data.getSourceTop().toString().removeSuffix("/").substringAfterLast('/'), // The original filename
-            style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurface,
-            maxLines = 1,
-            modifier = Modifier.basicMarquee()
-        )
     }
 }
 
