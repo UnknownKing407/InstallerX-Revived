@@ -484,6 +484,11 @@
     <string name="split_dpi_tvdpi">TV (~213dpi)</string>
     <string name="split_dpi_nodpi">No scaling</string>
     <string name="split_dpi_anydpi">Any density</string>
+    <string name="split_name_base_group_title">Base Application</string>
+    <string name="split_name_architecture_group_title">Architecture Splits</string>
+    <string name="split_name_language_group_title">Language Splits</string>
+    <string name="split_name_density_group_title">Screen Density Splits</string>
+    <string name="split_name_feature_group_title">Feature Splits</string>
     <!-- SplitNameUtil End -->
 
     <string name="suggestion_uninstall_and_retry">Uninstall old and retry</string>
