@@ -481,7 +481,7 @@ private fun InstallChoiceContent(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         val cardText = when (containerType) {
-            DataType.MIXED_MODULE_APK -> "请选择安装类型"
+            DataType.MIXED_MODULE_APK -> stringResource(R.string.installer_mixed_module_apk_description)
             DataType.MULTI_APK_ZIP -> stringResource(R.string.installer_multi_apk_zip_description)
             DataType.MULTI_APK -> stringResource(R.string.installer_multi_apk_description)
             else -> null
@@ -501,27 +501,26 @@ private fun InstallChoiceContent(
             )
         }
 
-        // Buttons (Only shown in list view for MultiApk)
-        if (!isModuleApk) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(
-                    onClick = { viewModel.dispatch(InstallerViewAction.Close) },
-                    text = stringResource(R.string.cancel),
-                    modifier = Modifier.weight(1f),
-                )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = { viewModel.dispatch(InstallerViewAction.Close) },
+                text = stringResource(R.string.cancel),
+                modifier = Modifier.weight(1f),
+            )
+            if (!isModuleApk)
                 TextButton(
                     onClick = primaryButtonAction,
                     text = stringResource(primaryButtonTextRes),
                     colors = ButtonDefaults.textButtonColorsPrimary(),
                     modifier = Modifier.weight(1f)
                 )
-            }
+
         }
     }
 }
@@ -542,70 +541,54 @@ private fun ChoiceLazyList(
 
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .wrapContentSize()
                 .scrollEndHaptic()
                 .overScrollVertical(),
             overscrollEffect = null,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
-            if (baseSelectableEntity != null) {
-                val baseEntityInfo = baseSelectableEntity.app as AppEntity.BaseEntity
-                item {
-                    Card(
-                        onClick = {
-                            viewModel.dispatch(
-                                InstallerViewAction.ToggleSelection(
-                                    packageName = baseSelectableEntity.app.packageName,
-                                    entity = baseSelectableEntity,
-                                    isMultiSelect = false
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardColors(
+                        color = cardColor,
+                        contentColor = MiuixTheme.colorScheme.onSurface
+                    )
+                ) {
+                    if (baseSelectableEntity != null) {
+                        val baseEntityInfo = baseSelectableEntity.app as AppEntity.BaseEntity
+                        MiuixNavigationItemWidget(
+                            title = baseEntityInfo.label ?: "N/A",
+                            description = "Package: ${baseEntityInfo.packageName}",
+                            onClick = {
+                                viewModel.dispatch(
+                                    InstallerViewAction.ToggleSelection(
+                                        packageName = baseSelectableEntity.app.packageName,
+                                        entity = baseSelectableEntity,
+                                        isMultiSelect = false
+                                    )
                                 )
-                            )
-                            viewModel.dispatch(InstallerViewAction.InstallPrepare)
-                        },
-                        colors = CardColors(
-                            color = cardColor,
-                            contentColor = MiuixTheme.colorScheme.onSurface
+                                viewModel.dispatch(InstallerViewAction.InstallPrepare)
+                            }
                         )
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            Text(baseEntityInfo.label ?: "N/A", style = MiuixTheme.textStyles.title2)
-                            Text(
-                                "Package: ${baseEntityInfo.packageName}",
-                                style = MiuixTheme.textStyles.body2,
-                                color = MiuixTheme.colorScheme.onSurface
-                            )
-                        }
                     }
-                }
-            }
-            if (moduleSelectableEntity != null) {
-                val moduleEntityInfo = moduleSelectableEntity.app as AppEntity.ModuleEntity
-                item {
-                    Card(
-                        onClick = {
-                            viewModel.dispatch(
-                                InstallerViewAction.ToggleSelection(
-                                    packageName = moduleSelectableEntity.app.packageName,
-                                    entity = moduleSelectableEntity,
-                                    isMultiSelect = false
+
+                    if (moduleSelectableEntity != null) {
+                        val moduleEntityInfo = moduleSelectableEntity.app as AppEntity.ModuleEntity
+                        MiuixNavigationItemWidget(
+                            title = moduleEntityInfo.name,
+                            description = "Module ID: ${moduleEntityInfo.id}",
+                            onClick = {
+                                viewModel.dispatch(
+                                    InstallerViewAction.ToggleSelection(
+                                        packageName = moduleSelectableEntity.app.packageName,
+                                        entity = moduleSelectableEntity,
+                                        isMultiSelect = false
+                                    )
                                 )
-                            )
-                            viewModel.dispatch(InstallerViewAction.InstallPrepare)
-                        },
-                        colors = CardColors(
-                            color = cardColor,
-                            contentColor = MiuixTheme.colorScheme.onSurface
+                                viewModel.dispatch(InstallerViewAction.InstallPrepare)
+                            }
                         )
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            Text(moduleEntityInfo.name, style = MiuixTheme.textStyles.title2)
-                            Text(
-                                "Module ID: ${moduleEntityInfo.id}",
-                                style = MiuixTheme.textStyles.body2,
-                                color = MiuixTheme.colorScheme.onSurface
-                            )
-                        }
                     }
                 }
             }
